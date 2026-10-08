@@ -10,7 +10,7 @@ export default function CodeViewer({ content, filename }) {
           <FileCode2 className="w-5 h-5 text-primary" />
           <h2 className="text-sm font-semibold font-mono text-gray-200 tracking-wider truncate">
             {filename}
-          </ Gentiles>
+    </h2>
         </div>
         <Code2 className="w-4 h-4 text-gray-700" />
       </div>
