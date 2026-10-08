@@ -58,7 +58,9 @@ export async function POST(req) {
             "react-dom": "^18.2.0",
             "next": "^14.2.0",
             "lucide-react": "^0.378.0",
-            "framer-motion": "^11.1.7" // Framer motion pehle se shamil hai
+            "framer-motion": "^11.1.7",
+            "clsx": "^2.1.1",           // Naya AI tool add ho gaya
+            "tailwind-merge": "^2.3.0"  // Naya AI tool add ho gaya
           },
           devDependencies: {
             "tailwindcss": "^3.4.3",
@@ -75,6 +77,7 @@ export async function POST(req) {
             content: [
               "./app/**/*.{js,ts,jsx,tsx}",
               "./components/**/*.{js,ts,jsx,tsx}",
+              "./lib/**/*.{js,ts,jsx,tsx}",
             ],
             theme: {
               extend: {},
@@ -118,7 +121,7 @@ export async function POST(req) {
       }
     ];
 
-    // Default files aur AI files ko ek saath milana (Override if exists)
+    // Default files aur AI files ko ek saath milana
     const allFilesMap = new Map();
     defaultTemplates.forEach(f => allFilesMap.set(f.file, f.data));
     files.forEach(f => allFilesMap.set(f.file, f.data));
@@ -136,7 +139,7 @@ export async function POST(req) {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        name: 'ai-web-builder-site', // Vercel Project ka temporary naam
+        name: 'ai-web-builder-site',
         files: finalFilesArray,
         projectSettings: {
           framework: 'nextjs'
@@ -151,7 +154,6 @@ export async function POST(req) {
       return new Response(JSON.stringify({ error: vercelData.error?.message || 'Deployment fail ho gayi' }), { status: vercelRes.status });
     }
 
-    // Success hone par live link wapas frontend bhejna
     return new Response(JSON.stringify({
       message: 'Deployment shuru ho chuki hai!',
       url: `https://${vercelData.url}`,
