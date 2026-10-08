@@ -1,1 +1,182 @@
+import { Octokit } from '@octokit/rest'
 
+// Gemini se aane wale text se 'filename' aur 'code' alag-alag karne wala parser
+function parseGeneratedCode(rawText) {
+  const files = []
+  // Yeh regex "=== file/path.js ===" ko identify karega
+  const regex = /===\s+([^\s]+)\s+===/g
+  let match
+  let lastIndex = 0
+  let currentFile = null
+
+  const matches = [...rawText.matchAll(regex)]
+
+  for (let i = 0; i < matches.length; i++) {
+    const match = matches[i]
+    if (currentFile) {
+      // Pichli file ka poora content extract karega
+      let content = rawText.substring(lastIndex, match.index).trim()
+      // Markdown code blocks (```js or ```) ko remove karne ke liye
+      content = content.replace(/^```[a-zA-Z]*\n/, '').replace(/\n```$/, '')
+      files.push({ path: currentFile, content })
+    }
+    currentFile = match[1]
+    lastIndex = match.index + match[0].length
+  }
+
+  // Aakhiri file ko extract karne ke liye
+  if (currentFile) {
+    let content = rawText.substring(lastIndex).trim()
+    content = content.replace(/^```[a-zA-Z]*\n/, '').replace(/\n```$/, '')
+    files.push({ path: currentFile, content })
+  }
+
+  return files
+}
+
+export async function POST(req) {
+  try {
+    const { code } = await req.json()
+    const token = process.env.GITHUB_PAT_TOKEN
+
+    if (!token) {
+      return new Response(JSON.stringify({ error: 'GitHub PAT Token is missing' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+
+    const files = parseGeneratedCode(code)
+
+    if (files.length === 0) {
+      return new Response(JSON.stringify({ error: 'Code me koi valid files nahi mili. Prompt ko thoda detail me de.' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+
+    // GitHub Client Initialize kar raha hai
+    const octokit = new Octokit({ auth: token })
+
+    // Authenticated user (Aapka account) get kar raha hai
+    const { data: user } = await octokit.rest.users.getAuthenticated()
+    const username = user.login
+
+    // Har baar unique repository banane ke liye timestamp
+    const timestamp = Date.now()
+    const repoName = `ai-site-${timestamp}`
+
+    // 1. GitHub par nayi Repository banana
+    await octokit.rest.repos.createForAuthenticatedUser({
+      name: repoName,
+      private: false, // Vercel free deployment ke liye public hona aasan rehta hai
+      auto_init: true, // auto README.md taaki empty branch ka error na aaye
+      description: 'Built by A S Tech AI Web Builder',
+    })
+
+    // Rate-limiting se bachne ke liye repo create hone ke baad 3 second ka wait
+    await new Promise((resolve) => setTimeout(resolve, 3000))
+
+    // 2. Default Configuration Files (Aapki Next.js App deploy hone ke liye guarantees)
+    const defaultTemplates = {
+      'package.json': JSON.stringify({
+        name: repoName,
+        version: "0.1.0",
+        private: true,
+        scripts: {
+          "dev": "next dev",
+          "build": "next build",
+          "start": "next start"
+        },
+        dependencies: {
+          "react": "^18.2.0",
+          "react-dom": "^18.2.0",
+          "next": "^14.2.0",
+          "lucide-react": "^0.378.0"
+        },
+        devDependencies: {
+          "tailwindcss": "^3.4.3",
+          "postcss": "^8.4.38",
+          "autoprefixer": "^10.4.19"
+        }
+      }, null, 2),
+      'tailwind.config.js': `
+        /** @type {import('tailwindcss').Config} */
+        module.exports = {
+          content: [
+            "./app/**/*.{js,ts,jsx,tsx}",
+            "./components/**/*.{js,ts,jsx,tsx}",
+          ],
+          theme: {
+            extend: {},
+          },
+          plugins: [],
+        }
+      `,
+      'postcss.config.js': `
+        module.exports = {
+          plugins: {
+            tailwindcss: {},
+            autoprefixer: {},
+          },
+        }
+      `,
+      'app/globals.css': `
+        @tailwind base;
+        @tailwind components;
+        @tailwind utilities;
+        body { background-color: #0c0f17; color: #ffffff; }
+      `,
+      'app/layout.js': `
+        import './globals.css'
+        export const metadata = { title: 'AI Website', description: 'Built with A S Tech Solutions' }
+        export default function RootLayout({ children }) {
+          return (
+            <html lang="en">
+              <body>{children}</body>
+            </html>
+          )
+        }
+      `
+    }
+
+    // AI generated files ko default files me override/add karna
+    const allFiles = { ...defaultTemplates }
+    files.forEach(file => {
+      allFiles[file.path] = file.content
+    })
+
+    // 3. Upload loop — Sabhi files ko ek-ek karke GitHub repo me daal raha hai
+    for (const [filePath, fileContent] of Object.entries(allFiles)) {
+      try {
+        await octokit.rest.repos.createOrUpdateFileContents({
+          owner: username,
+          repo: repoName,
+          path: filePath,
+          message: `Add ${filePath} - Generated by A S Tech AI Builder`,
+          content: Buffer.from(fileContent).toString('base64'),
+          branch: 'main',
+        })
+      } catch (uploadError) {
+        console.error(`File upload failed: ${filePath}`, uploadError)
+      }
+    }
+
+    const repoUrl = `https://github.com/${username}/${repoName}`
+
+    return new Response(JSON.stringify({
+      message: 'Repository successfully ready!',
+      repoUrl: repoUrl
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
+
+  } catch (error) {
+    console.error('GitHub API Error:', error)
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+}
