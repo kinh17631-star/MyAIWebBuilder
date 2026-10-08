@@ -4,8 +4,9 @@ import { FolderGit2, Code2, AlertTriangle } from 'lucide-react'
 import ChatInput from '../components/chatinput'
 import CodeViewer from '../components/codeviewer'
 import GithubExport from '../components/githubexport'
+import VercelDeploy from '../components/verceldeploy' // <-- Naya component import kiya
 
-// Frontend Regex Parser for === filename === format
+// Frontend Regex Parser
 function parseCodeBlocks(rawText) {
   const files = []
   const regex = /===\s+([^\s]+)\s+===/g
@@ -37,15 +38,22 @@ export default function Home() {
   const [parsedFiles, setParsedFiles] = useState([])
   const [selectedFileIndex, setSelectedFileIndex] = useState(0)
   const [isGenerating, setIsGenerating] = useState(false)
+  
+  // GitHub States
   const [isExporting, setIsExporting] = useState(false)
   const [repoUrl, setRepoUrl] = useState('')
+  
+  // Vercel States
+  const [isDeploying, setIsDeploying] = useState(false)
+  const [liveUrl, setLiveUrl] = useState('')
 
   const handleGenerate = async (prompt) => {
     setIsGenerating(true)
     setGeneratedCode('')
-    setParsedFiles([]) // Reset files
+    setParsedFiles([])
     setSelectedFileIndex(0)
     setRepoUrl('')
+    setLiveUrl('') // Naya deploy shuru hote hi purana link hata do
 
     try {
       const response = await fetch('/api/generate', {
@@ -68,7 +76,6 @@ export default function Home() {
         fullText += chunkValue
         setGeneratedCode(fullText)
         
-        // Live parsing for File Tree display
         const updatedFiles = parseCodeBlocks(fullText)
         if (updatedFiles.length > 0) {
           setParsedFiles(updatedFiles)
@@ -82,6 +89,7 @@ export default function Home() {
     }
   }
 
+  // GitHub Backup Function
   const handleExport = async () => {
     if (!generatedCode) return
     setIsExporting(true)
@@ -106,12 +114,37 @@ export default function Home() {
     }
   }
 
+  // Naya: Vercel Direct Deploy Function
+  const handleVercelDeploy = async () => {
+    if (!generatedCode) return
+    setIsDeploying(true)
+    try {
+      const response = await fetch('/api/deploy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: generatedCode }),
+      })
+      const data = await response.json()
+      
+      if (data.url) {
+        setLiveUrl(data.url)
+      } else {
+        alert("Vercel Deploy Error: " + data.error)
+      }
+    } catch (error) {
+      console.error("Deploy Error:", error)
+      alert("Vercel par deploy nahi ho paya.")
+    } finally {
+      setIsDeploying(false)
+    }
+  }
+
   const selectedFile = parsedFiles[selectedFileIndex]
 
   return (
     <main className="max-w-[1920px] mx-auto p-4 md:p-6 min-h-screen flex flex-col gap-6 bg-background">
       {/* Premium Split Header */}
-      <header className="flex items-center justify-between gap-4 p-4 bg-surface rounded-2xl border border-gray-800 shadow-xl">
+      <header className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 p-4 bg-surface rounded-2xl border border-gray-800 shadow-xl">
         <div className="flex items-center gap-3">
           <FolderGit2 className="w-8 h-8 text-primary" />
           <div className="flex flex-col gap-0.5">
@@ -122,13 +155,18 @@ export default function Home() {
           </div>
         </div>
         
-        {/* Export Button inside header */}
+        {/* Action Buttons (Dono Buttons yahan hain) */}
         {generatedCode && !isGenerating && (
-          <div className="w-64 animate-in fade-in slide-in-from-bottom-2 duration-500">
+          <div className="flex items-center gap-3 w-full md:w-auto animate-in fade-in slide-in-from-bottom-2 duration-500">
             <GithubExport 
               onExport={handleExport} 
               isExporting={isExporting} 
               repoUrl={repoUrl} 
+            />
+            <VercelDeploy 
+              onDeploy={handleVercelDeploy} 
+              isDeploying={isDeploying} 
+              liveUrl={liveUrl} 
             />
           </div>
         )}
@@ -136,7 +174,7 @@ export default function Home() {
 
       {/* Modern Split Panels (Grid) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1 overflow-hidden">
-        {/* Left Sidebar (File Tree): col-span-3 */}
+        {/* Left Sidebar (File Tree) */}
         <aside className="lg:col-span-3 flex flex-col gap-4 bg-surface border border-gray-800 rounded-2xl p-4 overflow-auto min-h-[400px]">
           <div className="flex items-center gap-2 border-b border-gray-800 pb-3 mb-1">
             <FolderGit2 className="w-5 h-5 text-primary" />
@@ -177,7 +215,7 @@ export default function Home() {
           )}
         </aside>
 
-        {/* Right Main Area (Code Viewer): col-span-9 */}
+        {/* Right Main Area (Code Viewer) */}
         <section className="lg:col-span-9 flex flex-col bg-surface border border-gray-800 rounded-2xl overflow-hidden shadow-2xl min-h-[400px]">
           <CodeViewer 
             content={selectedFile ? selectedFile.content : generatedCode} 
