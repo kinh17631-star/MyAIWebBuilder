@@ -1,6 +1,7 @@
+export const dynamic = 'force-dynamic';
+
 export async function POST(req) {
   try {
-    // 1. projectId ko receive karein session persistence ke liye
     const { code, projectId } = await req.json();
     const token = process.env.VERCEL_TOKEN;
 
@@ -11,7 +12,6 @@ export async function POST(req) {
       });
     }
 
-    // 2. Generated code ko files mein split karna
     const files = [];
     const regex = /===\s+([^\s]+)\s+===/g;
     let match;
@@ -38,10 +38,12 @@ export async function POST(req) {
     }
 
     if (files.length === 0) {
-      return new Response(JSON.stringify({ error: 'Code mein koi valid file structure nahi mila' }), { status: 400 });
+      return new Response(JSON.stringify({ error: 'Code mein koi valid file structure nahi mila' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
 
-    // 3. Default Next.js Configuration Files
     const defaultTemplates = [
       {
         file: 'package.json',
@@ -72,43 +74,36 @@ export async function POST(req) {
       },
       {
         file: 'tailwind.config.js',
-        data: `
-          /** @type {import('tailwindcss').Config} */
-          module.exports = {
-            content: [
-              "./app/**/*.{js,ts,jsx,tsx}",
-              "./components/**/*.{js,ts,jsx,tsx}",
-              "./lib/**/*.{js,ts,jsx,tsx}",
-            ],
-            theme: {
-              extend: {},
-            },
-            plugins: [],
-          }
-        `
+        data: `/** @type {import('tailwindcss').Config} */
+module.exports = {
+  content: [
+    "./app/**/*.{js,ts,jsx,tsx}",
+    "./components/**/*.{js,ts,jsx,tsx}",
+    "./lib/**/*.{js,ts,jsx,tsx}",
+  ],
+  theme: {
+    extend: {},
+  },
+  plugins: [],
+}`
       },
       {
         file: 'postcss.config.js',
-        data: `
-          module.exports = {
-            plugins: {
-              tailwindcss: {},
-              autoprefixer: {},
-            },
-          }
-        `
+        data: `module.exports = {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
+  },
+}`
       },
       {
         file: 'app/globals.css',
-        data: `
-          @tailwind base;
-          @tailwind components;
-          @tailwind utilities;
-        `
+        data: `@tailwind base;
+@tailwind components;
+@tailwind utilities;`
       }
     ];
 
-    // AI generated files aur default templates merge karein (AI files override karengi)
     const allFilesMap = new Map();
     defaultTemplates.forEach(f => allFilesMap.set(f.file, f.data));
     files.forEach(f => allFilesMap.set(f.file, f.data));
@@ -118,7 +113,6 @@ export async function POST(req) {
       data
     }));
 
-    // 4. Vercel Payload: Agar projectId maujood hai toh wahi project target karein
     const targetProjectName = projectId || `ai-site-${Date.now().toString().slice(-6)}`;
 
     const payload = {
@@ -129,7 +123,6 @@ export async function POST(req) {
       }
     };
 
-    // Agar existing projectId hai toh Vercel ko specific project target karwayein
     if (projectId) {
       payload.project = projectId;
     }
@@ -148,3 +141,26 @@ export async function POST(req) {
     if (!vercelRes.ok) {
       console.error('Vercel Deployment Error:', vercelData);
       return new Response(JSON.stringify({ error: vercelData.error?.message || 'Deployment fail ho gayi' }), {
+        status: vercelRes.status,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    return new Response(JSON.stringify({
+      message: 'Deployment shuru ho chuki hai!',
+      url: `https://${vercelData.url}`,
+      deploymentId: vercelData.id,
+      projectId: vercelData.projectId || targetProjectName
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+  } catch (error) {
+    console.error('Direct Deploy Error:', error);
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+}
