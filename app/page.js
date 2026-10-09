@@ -1,6 +1,6 @@
 'use client'
 import { useState } from 'react'
-import { FolderGit2, Code2, AlertTriangle } from 'lucide-react'
+import { FolderGit2, Code2, AlertTriangle, RefreshCw, Rocket } from 'lucide-react'
 import ChatInput from '../components/chatinput'
 import CodeViewer from '../components/codeviewer'
 import GithubExport from '../components/githubexport'
@@ -12,21 +12,35 @@ export default function Home() {
   const [selectedFileIndex, setSelectedFileIndex] = useState(0)
   const [isGenerating, setIsGenerating] = useState(false)
   
-  // GitHub States
-  const [isExporting, setIsExporting] = useState(false)
+  // Persistent Session States
+  const [projectId, setProjectId] = useState(null) // Purana session ID
   const [repoUrl, setRepoUrl] = useState('')
-  
-  // Vercel States
-  const [isDeploying, setIsDeploying] = useState(false)
   const [liveUrl, setLiveUrl] = useState('')
+  const [isExporting, setIsExporting] = useState(false)
+  const [isDeploying, setIsDeploying] = useState(false)
 
-  const handleGenerate = async (prompt) => {
-    setIsGenerating(true)
+  // Session Reset Function
+  const handleResetSession = () => {
+    setGeneratedCode('')
+    setParsedFiles([])
+    setSelectedFileIndex(0)
+    setProjectId(null)
     setRepoUrl('')
     setLiveUrl('')
+    alert("Session successfully reset! Aap bilkul fresh prompt de sakte hain.")
+  }
+
+  const handleGenerate = async (prompt) => {
+    // 1. Agar user ne 'reset' command diya hai
+    if (prompt.trim().toLowerCase() === 'reset') {
+      handleResetSession()
+      return
+    }
+
+    setIsGenerating(true)
 
     try {
-      // Memory Feature: Agar pehle se website ka code screen par hai, toh sath bhejo
+      // Memory: Session ka purana code aur projectId dono backend ko jayenge
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -43,11 +57,9 @@ export default function Home() {
       }
 
       if (data.files && Array.isArray(data.files)) {
-        // Backend Master Validator se direct clean files assign karein
         setParsedFiles(data.files)
         setSelectedFileIndex(0)
 
-        // Raw code format construct karein jo Deploy aur GitHub API ke kaam aaye
         const rawFullText = data.files
           .map((f) => `=== ${f.path} ===\n${f.content}`)
           .join('\n\n')
@@ -63,7 +75,7 @@ export default function Home() {
     }
   }
 
-  // GitHub Backup Function
+  // GitHub Export / Update Function
   const handleExport = async () => {
     if (!generatedCode) return
     setIsExporting(true)
@@ -71,24 +83,28 @@ export default function Home() {
       const response = await fetch('/api/github', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: generatedCode }),
+        body: JSON.stringify({ 
+          code: generatedCode,
+          projectId: projectId 
+        }),
       })
       const data = await response.json()
       
       if (data.repoUrl) {
         setRepoUrl(data.repoUrl)
+        if (data.projectId) setProjectId(data.projectId)
       } else {
-        alert("GitHub Push Error: " + data.error)
+        alert("GitHub Error: " + data.error)
       }
     } catch (error) {
       console.error("Export Error:", error)
-      alert("GitHub par code push nahi ho paya.")
+      alert("GitHub par push nahi ho paya.")
     } finally {
       setIsExporting(false)
     }
   }
 
-  // Vercel Direct Deploy Function
+  // Vercel Deploy / Re-Deploy Function
   const handleVercelDeploy = async () => {
     if (!generatedCode) return
     setIsDeploying(true)
@@ -96,12 +112,16 @@ export default function Home() {
       const response = await fetch('/api/deploy', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: generatedCode }),
+        body: JSON.stringify({ 
+          code: generatedCode,
+          projectId: projectId // Agar exist karta hai toh usi project par redeploy hoga
+        }),
       })
       const data = await response.json()
       
       if (data.url) {
         setLiveUrl(data.url)
+        if (data.projectId) setProjectId(data.projectId) // Session ID lock kar li
       } else {
         alert("Vercel Deploy Error: " + data.error)
       }
@@ -125,30 +145,62 @@ export default function Home() {
             <h1 className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-primary to-cyan-400 uppercase tracking-widest">
               MyAIWebBuilder
             </h1>
-            <p className="text-gray-400 text-xs">Error-Free Multi-Page Engine</p>
+            <p className="text-gray-400 text-xs">
+              {projectId ? `Active Session: [${projectId}]` : 'Error-Free Multi-Page Engine'}
+            </p>
           </div>
         </div>
         
         {/* Action Buttons */}
         {generatedCode && !isGenerating && (
           <div className="flex items-center gap-3 w-full md:w-auto animate-in fade-in slide-in-from-bottom-2 duration-500">
+            {/* Manual Reset Button */}
+            <button
+              onClick={handleResetSession}
+              className="px-3 py-2 text-xs font-semibold text-gray-400 hover:text-red-400 bg-gray-900 border border-gray-800 hover:border-red-500/40 rounded-xl transition-all flex items-center gap-1.5"
+              title="Type 'reset' in chat or click here"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              Reset Project
+            </button>
+
             <GithubExport 
               onExport={handleExport} 
               isExporting={isExporting} 
               repoUrl={repoUrl} 
             />
-            <VercelDeploy 
-              onDeploy={handleVercelDeploy} 
-              isDeploying={isDeploying} 
-              liveUrl={liveUrl} 
-            />
+            
+            {/* Deploy / Re-Deploy Smart Button */}
+            <button
+              onClick={handleVercelDeploy}
+              disabled={isDeploying}
+              className="px-4 py-2 text-sm font-semibold text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 rounded-xl shadow-lg transition-all flex items-center gap-2"
+            >
+              <Rocket className={`w-4 h-4 ${isDeploying ? 'animate-spin' : ''}`} />
+              {isDeploying 
+                ? 'Processing...' 
+                : projectId 
+                  ? '🔄 Re-Deploy Changes' 
+                  : '🚀 Deploy to Vercel'}
+            </button>
+
+            {liveUrl && (
+              <a
+                href={liveUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="px-3 py-2 text-xs font-bold text-green-400 bg-green-950/40 border border-green-800 rounded-xl hover:bg-green-900/60 transition-all"
+              >
+                Open Live Site ↗
+              </a>
+            )}
           </div>
         )}
       </header>
 
-      {/* Modern Split Panels (Grid) */}
+      {/* Grid Panels */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1 overflow-hidden">
-        {/* Left Sidebar (File Tree) */}
+        {/* File Tree */}
         <aside className="lg:col-span-3 flex flex-col gap-4 bg-surface border border-gray-800 rounded-2xl p-4 overflow-auto min-h-[400px]">
           <div className="flex items-center gap-2 border-b border-gray-800 pb-3 mb-1">
             <FolderGit2 className="w-5 h-5 text-primary" />
@@ -177,19 +229,19 @@ export default function Home() {
                {isGenerating ? (
                   <div className="flex flex-col items-center gap-2">
                      <FolderGit2 className="w-10 h-10 animate-pulse text-primary" />
-                     Validating & cleaning code...
+                     {projectId ? 'Updating existing project...' : 'Generating files...'}
                   </div>
                ) : (
                   <>
                      <AlertTriangle className="w-10 h-10" />
-                     Naya prompt dekar files generate karein...
+                     Naya prompt dekar website banayein...
                   </>
                )}
             </div>
           )}
         </aside>
 
-        {/* Right Main Area (Code Viewer) */}
+        {/* Code Viewer */}
         <section className="lg:col-span-9 flex flex-col bg-surface border border-gray-800 rounded-2xl overflow-hidden shadow-2xl min-h-[400px]">
           <CodeViewer 
             content={selectedFile ? selectedFile.content : generatedCode} 
@@ -198,9 +250,13 @@ export default function Home() {
         </section>
       </div>
 
-      {/* Floating Bottom Chat Panel */}
+      {/* Floating Chat Input */}
       <footer className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] md:w-[800px] z-50">
-        <ChatInput onSubmit={handleGenerate} isLoading={isGenerating} />
+        <ChatInput 
+          onSubmit={handleGenerate} 
+          isLoading={isGenerating} 
+          placeholder={projectId ? "Changes prompt karein, ya 'reset' likhein..." : "Kaisi website banani hai?..."}
+        />
       </footer>
     </main>
   )
