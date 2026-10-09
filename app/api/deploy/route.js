@@ -1,6 +1,7 @@
 export async function POST(req) {
   try {
-    const { code } = await req.json();
+    // 1. projectId ko receive karein session persistence ke liye
+    const { code, projectId } = await req.json();
     const token = process.env.VERCEL_TOKEN;
 
     if (!token) {
@@ -10,7 +11,7 @@ export async function POST(req) {
       });
     }
 
-    // 1. Generated code ko files mein todna (Parser)
+    // 2. Generated code ko files mein split karna
     const files = [];
     const regex = /===\s+([^\s]+)\s+===/g;
     let match;
@@ -40,7 +41,7 @@ export async function POST(req) {
       return new Response(JSON.stringify({ error: 'Code mein koi valid file structure nahi mila' }), { status: 400 });
     }
 
-    // 2. Vercel ke liye default Next.js Configuration Files
+    // 3. Default Next.js Configuration Files
     const defaultTemplates = [
       {
         file: 'package.json',
@@ -59,8 +60,8 @@ export async function POST(req) {
             "next": "^14.2.0",
             "lucide-react": "^0.378.0",
             "framer-motion": "^11.1.7",
-            "clsx": "^2.1.1",           // Naya AI tool add ho gaya
-            "tailwind-merge": "^2.3.0"  // Naya AI tool add ho gaya
+            "clsx": "^2.1.1",
+            "tailwind-merge": "^2.3.0"
           },
           devDependencies: {
             "tailwindcss": "^3.4.3",
@@ -103,25 +104,11 @@ export async function POST(req) {
           @tailwind base;
           @tailwind components;
           @tailwind utilities;
-          body { background-color: #0c0f17; color: #ffffff; }
-        `
-      },
-      {
-        file: 'app/layout.js',
-        data: `
-          import './globals.css'
-          export default function RootLayout({ children }) {
-            return (
-              <html lang="en">
-                <body>{children}</body>
-              </html>
-            )
-          }
         `
       }
     ];
 
-    // Default files aur AI files ko ek saath milana
+    // AI generated files aur default templates merge karein (AI files override karengi)
     const allFilesMap = new Map();
     defaultTemplates.forEach(f => allFilesMap.set(f.file, f.data));
     files.forEach(f => allFilesMap.set(f.file, f.data));
@@ -131,43 +118,33 @@ export async function POST(req) {
       data
     }));
 
-    // 3. Vercel REST API ko direct call karna
+    // 4. Vercel Payload: Agar projectId maujood hai toh wahi project target karein
+    const targetProjectName = projectId || `ai-site-${Date.now().toString().slice(-6)}`;
+
+    const payload = {
+      name: targetProjectName,
+      files: finalFilesArray,
+      projectSettings: {
+        framework: 'nextjs'
+      }
+    };
+
+    // Agar existing projectId hai toh Vercel ko specific project target karwayein
+    if (projectId) {
+      payload.project = projectId;
+    }
+
     const vercelRes = await fetch('https://api.vercel.com/v13/deployments', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({
-        name: 'ai-web-builder-site',
-        files: finalFilesArray,
-        projectSettings: {
-          framework: 'nextjs'
-        }
-      })
+      body: JSON.stringify(payload)
     });
 
     const vercelData = await vercelRes.json();
 
     if (!vercelRes.ok) {
       console.error('Vercel Deployment Error:', vercelData);
-      return new Response(JSON.stringify({ error: vercelData.error?.message || 'Deployment fail ho gayi' }), { status: vercelRes.status });
-    }
-
-    return new Response(JSON.stringify({
-      message: 'Deployment shuru ho chuki hai!',
-      url: `https://${vercelData.url}`,
-      deploymentId: vercelData.id
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
-
-  } catch (error) {
-    console.error('Direct Deploy Error:', error);
-    return new Response(JSON.stringify({ error: error.message }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-}
+      return new Response(JSON.stringify({ error: vercelData.error?.message || 'Deployment fail ho gayi' }), {
